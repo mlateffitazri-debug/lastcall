@@ -223,6 +223,19 @@
 
 </div>
 
+<!-- Confirm cigarette log modal -->
+<div id="confirmLogModal" class="modal-overlay hidden">
+  <div class="modal-card confirm-log-card">
+    <svg class="modal-icon confirm-log-icon" viewBox="0 0 24 24"><rect x="2" y="13" width="14" height="4" rx="1"/><line x1="13" y1="13" x2="13" y2="17"/><path d="M18 11c0 1-1 1 1 2s1 1 1 2"/><path d="M20.5 10.5c0 1-1 1-1 2s1 1 1 2"/></svg>
+    <h3>Anda baru merokok?</h3>
+    <p class="modal-sub">Tekan sahkan hanya jika anda benar-benar baru menghisap rokok. Ini akan menetapkan semula kiraan masa.</p>
+    <div class="confirm-log-actions">
+      <button id="confirmLogCancel" class="confirm-log-cancel" type="button">Batal</button>
+      <button id="confirmLogYes" class="modal-close-btn confirm-log-yes" type="button">Ya, rekodkan</button>
+    </div>
+  </div>
+</div>
+
 <!-- Damage facts modal shown right after logging a cigarette -->
 <div id="damageModal" class="modal-overlay hidden">
   <div class="modal-card">
