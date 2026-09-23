@@ -417,12 +417,28 @@
     return out;
   }
 
-  function logCigarette() {
+  let logActionLocked = false;
+
+  function openLogConfirm() {
+    const modal = $("confirmLogModal");
+    if (!modal || logActionLocked) return;
+    modal.classList.remove("hidden");
+  }
+
+  function closeLogConfirm() {
+    $("confirmLogModal")?.classList.add("hidden");
+  }
+
+  function confirmLogCigarette() {
+    if (logActionLocked) return;
+    logActionLocked = true;
     const logs = getLogs();
     logs.push(Date.now());
     saveLogs(logs);
+    closeLogConfirm();
     refreshAll();
     showDamageModal();
+    setTimeout(() => { logActionLocked = false; }, 800);
   }
 
   function showDamageModal() {
@@ -531,7 +547,12 @@
   });
 
   // ---------- Buttons ----------
-  $("logCigBtn").addEventListener("click", logCigarette);
+  $("logCigBtn").addEventListener("click", openLogConfirm);
+  $("confirmLogCancel")?.addEventListener("click", closeLogConfirm);
+  $("confirmLogYes")?.addEventListener("click", confirmLogCigarette);
+  $("confirmLogModal")?.addEventListener("click", (e) => {
+    if (e.target === $("confirmLogModal")) closeLogConfirm();
+  });
   undoBtn.addEventListener("click", undoLast);
   $("modalCloseBtn").addEventListener("click", () => $("damageModal").classList.add("hidden"));
 
