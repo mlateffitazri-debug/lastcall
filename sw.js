@@ -1,4 +1,4 @@
-const CACHE_NAME = "lastcall-v14";
+const CACHE_NAME = "lastcall-v16";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -6,6 +6,7 @@ const APP_SHELL = [
   "./app.js",
   "./manifest.json",
   "./favicon.ico",
+  "./favcon-01.svg",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/icon-maskable-192.png",

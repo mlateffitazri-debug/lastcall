@@ -9,6 +9,7 @@
 <meta name="color-scheme" content="dark">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="favicon.ico">
+<link rel="icon" type="image/svg+xml" href="favcon-01.svg">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -20,12 +21,25 @@
 </head>
 <body>
 
+<!-- Intro splash — shown once per page load while app.js boots, then fades out -->
+<div id="splashScreen" class="splash-screen" aria-hidden="true">
+  <div class="splash-logo-wrap">
+    <img class="splash-logo" src="icons/logo-96-transparent.png" alt="">
+    <span class="splash-ring"></span>
+  </div>
+  <span class="splash-name">LastCall</span>
+  <span class="splash-tagline">Your quit smoking companion</span>
+</div>
+
 <div class="app">
 
   <header class="topbar">
     <div class="brand">
       <img class="brand-mark" src="icons/logo-96-transparent.png" alt="LastCall">
-      <span class="brand-name">LastCall</span>
+      <div class="brand-text">
+        <span class="brand-name">LastCall</span>
+        <span class="brand-tagline">Your quit smoking companion</span>
+      </div>
     </div>
     <button id="installBtn" class="install-btn hidden" type="button">
       <svg class="btn-icon" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>

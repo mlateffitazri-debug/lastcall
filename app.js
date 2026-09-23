@@ -753,6 +753,19 @@
   refreshAll();
   loadSettingsIntoForm();
 
+  // ---------- Intro splash ----------
+  // First paint already has real data by now (refreshAll ran above), so the
+  // splash isn't hiding a blank/loading state — it's a short branded beat
+  // before the app underneath is revealed.
+  const splashScreen = $("splashScreen");
+  if (splashScreen) {
+    setTimeout(() => {
+      splashScreen.classList.add("splash-out");
+      splashScreen.addEventListener("transitionend", () => splashScreen.remove(), { once: true });
+      setTimeout(() => splashScreen.remove(), 800); // fallback if transitionend never fires
+    }, 1100);
+  }
+
   // ---------- Service worker ----------
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
