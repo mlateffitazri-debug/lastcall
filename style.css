@@ -618,3 +618,15 @@ body {
 .hidden { display: none !important; }
 
 .hidden { display: none !important; }
+
+
+/* ---------- Confirm cigarette log ---------- */
+.confirm-log-card { padding-bottom: calc(24px + var(--safe-bottom)); }
+.confirm-log-icon { color: var(--danger); }
+.confirm-log-actions { display: grid; grid-template-columns: 1fr 1.35fr; gap: 10px; margin-top: 18px; }
+.confirm-log-cancel,
+.confirm-log-yes { width: 100%; min-height: 48px; border-radius: 14px; font-size: 14px; font-weight: 800; cursor: pointer; }
+.confirm-log-cancel { border: 1px solid var(--border); background: var(--bg-elev-2); color: var(--text-dim); }
+.confirm-log-yes { padding: 12px; background: var(--danger); color: #fff; border: none; }
+.confirm-log-cancel:active,
+.confirm-log-yes:active { transform: scale(0.98); }
