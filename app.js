@@ -7,11 +7,16 @@
   const DAY = 24 * 3600 * 1000;
 
   // ---------- Data helpers ----------
+  // Defensive against corrupted/legacy localStorage: never let a bad value
+  // (wrong type, NaN, future timestamp, negative price) crash the app.
   function getLogs() {
-    try {
-      const raw = JSON.parse(localStorage.getItem(LOGS_KEY) || "[]");
-      return Array.isArray(raw) ? raw.sort((a, b) => a - b) : [];
-    } catch { return []; }
+    let raw;
+    try { raw = JSON.parse(localStorage.getItem(LOGS_KEY) || "[]"); } catch { return []; }
+    if (!Array.isArray(raw)) return [];
+    const now = Date.now();
+    return raw
+      .filter((t) => typeof t === "number" && Number.isFinite(t) && t > 0 && t <= now)
+      .sort((a, b) => a - b);
   }
   function saveLogs(logs) {
     localStorage.setItem(LOGS_KEY, JSON.stringify(logs));
@@ -19,7 +24,11 @@
   function getSettings() {
     let s = {};
     try { s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"); } catch {}
-    return Object.assign({ pricePerCig: 0.6, quitDate: null }, s);
+    if (!s || typeof s !== "object" || Array.isArray(s)) s = {};
+    const merged = Object.assign({ pricePerCig: 0.6, quitDate: null, bestStreakMs: 0 }, s);
+    if (!Number.isFinite(merged.pricePerCig) || merged.pricePerCig < 0) merged.pricePerCig = 0.6;
+    if (!Number.isFinite(merged.bestStreakMs) || merged.bestStreakMs < 0) merged.bestStreakMs = 0;
+    return merged;
   }
   function saveSettings(s) {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
@@ -125,6 +134,8 @@
   const milestoneEta = $("milestoneEta");
   const milestoneProgress = $("milestoneProgress");
   const milestoneDesc = $("milestoneDesc");
+  const bestStreakBadge = $("bestStreakBadge");
+  const bestStreakValue = $("bestStreakValue");
   const undoBtn = $("undoBtn");
   const statToday = $("statToday");
   const statWeek = $("statWeek");
@@ -170,6 +181,7 @@
       heroLabel.textContent = "Belum ada log";
       heroSub.textContent = "Tekan butang di bawah untuk mula menjejak.";
       undoBtn.classList.add("hidden");
+      bestStreakBadge.classList.add("hidden");
       updateMilestone(null);
       renderFullTimeline(0);
       return;
@@ -184,6 +196,33 @@
     undoBtn.classList.toggle("hidden", logs.length === 0);
     updateMilestone(elapsedMs / 1000);
     renderFullTimeline(elapsedMs / 1000);
+    updateBestStreak(elapsedMs);
+  }
+
+  // Best streak = the longest interval ever reached between consecutive
+  // logs, including the streak currently in progress. A relapse must never
+  // erase this — it only resets the *current* streak (see getReferenceTime).
+  function formatDurationShort(ms) {
+    const totalMin = Math.floor(ms / 60000);
+    const days = Math.floor(totalMin / 1440);
+    const hours = Math.floor((totalMin % 1440) / 60);
+    const mins = totalMin % 60;
+    if (days > 0) return `${days} hari ${hours} jam`;
+    if (hours > 0) return `${hours} jam ${mins} minit`;
+    return `${mins} minit`;
+  }
+  function updateBestStreak(currentStreakMs) {
+    const settings = getSettings();
+    if (currentStreakMs > settings.bestStreakMs) {
+      settings.bestStreakMs = currentStreakMs;
+      saveSettings(settings);
+    }
+    if (settings.bestStreakMs > 60000) {
+      bestStreakValue.textContent = formatDurationShort(settings.bestStreakMs);
+      bestStreakBadge.classList.remove("hidden");
+    } else {
+      bestStreakBadge.classList.add("hidden");
+    }
   }
 
   function updateMilestone(elapsedSec) {
@@ -520,13 +559,71 @@
   });
 
   $("resetBtn")?.addEventListener("click", () => {
-    if (confirm("Padam SEMUA data log dan tetapan? Tindakan ini tidak boleh diundur.")) {
+    if (confirm("Padam SEMUA data log dan tetapan? Tindakan ini tidak boleh diundur. Pertimbangkan untuk Eksport dahulu.")) {
       localStorage.removeItem(LOGS_KEY);
       localStorage.removeItem(SETTINGS_KEY);
       loadSettingsIntoForm();
       refreshAll();
       showToast("Semua data telah direset");
     }
+  });
+
+  // ---------- Export / Import ----------
+  $("exportBtn")?.addEventListener("click", () => {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      logs: getLogs(),
+      settings: getSettings(),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `lastcall-backup-${dateStr}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast("Data dieksport");
+  });
+
+  const importFileInput = $("importFile");
+  $("importBtn")?.addEventListener("click", () => importFileInput?.click());
+  importFileInput?.addEventListener("change", () => {
+    const file = importFileInput.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      let parsed;
+      try {
+        parsed = JSON.parse(String(reader.result));
+      } catch {
+        showToast("Fail tidak sah — bukan format JSON yang betul");
+        importFileInput.value = "";
+        return;
+      }
+      const incomingLogs = Array.isArray(parsed.logs)
+        ? parsed.logs.filter((t) => typeof t === "number" && Number.isFinite(t) && t > 0)
+        : null;
+      const incomingSettings = parsed.settings && typeof parsed.settings === "object" ? parsed.settings : null;
+      if (!incomingLogs && !incomingSettings) {
+        showToast("Fail tidak mengandungi data LastCall yang sah");
+        importFileInput.value = "";
+        return;
+      }
+      if (!confirm("Import akan menggantikan data semasa. Teruskan?")) {
+        importFileInput.value = "";
+        return;
+      }
+      if (incomingLogs) saveLogs(incomingLogs.sort((a, b) => a - b));
+      if (incomingSettings) saveSettings(Object.assign(getSettings(), incomingSettings));
+      loadSettingsIntoForm();
+      refreshAll();
+      showToast("Data berjaya dipulihkan");
+      importFileInput.value = "";
+    };
+    reader.readAsText(file);
   });
 
   // ---------- Tab navigation ----------

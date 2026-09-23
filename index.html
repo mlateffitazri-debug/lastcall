@@ -42,6 +42,10 @@
         <p class="hero-label" id="heroLabel">Tidak merokok selama</p>
         <div class="hero-timer" id="heroTimer">00:00:00</div>
         <p class="hero-sub" id="heroSub">Mula log rokok pertama anda untuk bermula</p>
+        <div class="best-streak-badge hidden" id="bestStreakBadge">
+          <svg viewBox="0 0 24 24"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a1 1 0 0 0-1 1c0 2.5 1.8 4.5 4.2 4.9"/><path d="M17 6h3a1 1 0 0 1 1 1c0 2.5-1.8 4.5-4.2 4.9"/></svg>
+          <span>Streak terbaik: <strong id="bestStreakValue">—</strong></span>
+        </div>
       </div>
 
       <div class="milestone-card" id="milestoneCard">
@@ -184,6 +188,22 @@
         <p class="field-hint">Jika ditetapkan, kiraan "tidak merokok" akan bermula dari tarikh ini selagi tiada log baru.</p>
       </div>
 
+      <div class="settings-card">
+        <label class="field-label">Data Saya</label>
+        <div class="data-btn-row">
+          <button id="exportBtn" class="secondary-btn" type="button" style="margin-bottom:0">
+            <svg class="btn-icon" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+            Eksport
+          </button>
+          <button id="importBtn" class="secondary-btn" type="button" style="margin-bottom:0">
+            <svg class="btn-icon" viewBox="0 0 24 24"><path d="M12 21V9"/><path d="m7 14 5-5 5 5"/><path d="M5 3h14"/></svg>
+            Import
+          </button>
+          <input type="file" id="importFile" accept="application/json" class="hidden">
+        </div>
+        <p class="field-hint">Simpan salinan data anda sebagai fail, atau pulihkan dari salinan sedia ada. Data disimpan pada peranti ini sahaja.</p>
+      </div>
+
       <button id="installBtn2" class="secondary-btn hidden" type="button">
         <svg class="btn-icon" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
         Pasang App ke Peranti
@@ -208,7 +228,7 @@
     <button class="tab-btn" data-view="timeline" type="button" aria-label="Garis Masa">
       <svg class="tab-icon" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
     </button>
-    <button id="logCigBtn" class="tab-btn-center" type="button" aria-label="Saya Baru Isap Rokok">
+    <button id="logCigBtn" class="tab-btn-center" type="button" aria-label="Saya baru merokok — rekod rokok">
       <span class="tab-center-bubble">
         <svg viewBox="0 0 24 24"><rect x="2" y="13" width="14" height="4" rx="1"/><line x1="13" y1="13" x2="13" y2="17"/><path d="M18 11c0 1-1 1-1 2s1 1 1 2"/><path d="M20.5 10.5c0 1-1 1-1 2s1 1 1 2"/></svg>
       </span>
