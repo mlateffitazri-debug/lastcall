@@ -3,6 +3,7 @@
 
   const LOGS_KEY = "lastcall_logs_v1";
   const SETTINGS_KEY = "lastcall_settings_v1";
+  const SCHEMA_VERSION = 2;
 
   const DAY = 24 * 3600 * 1000;
 
@@ -21,17 +22,96 @@
   function saveLogs(logs) {
     localStorage.setItem(LOGS_KEY, JSON.stringify(logs));
   }
+
+  const DEFAULT_SETTINGS = {
+    // Legacy (pre-amendment) fields — kept so existing users' data and cost
+    // history are never silently altered.
+    pricePerCig: 0.6,
+    quitDate: null,
+    // Canonical single source of truth for the active quit-attempt timer.
+    // The Current Streak and the Medical Timeline both derive elapsedMs
+    // from this one timestamp — see getReferenceTime().
+    currentAttemptStartedAt: null,
+    bestStreakMs: 0,
+    // New pack-based money model (section 9/10 of the amendment).
+    packPrice: null,
+    sticksPerPack: null,
+    cigarettesPerDay: null,
+    appLock: {
+      enabled: false,
+      hashHex: null,
+      saltHex: null,
+      pinLength: null,
+      timeoutMin: 5,
+      failedAttempts: 0,
+      lockoutUntil: 0,
+      lastUnlockedAt: null,
+    },
+  };
+
   function getSettings() {
     let s = {};
     try { s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"); } catch {}
     if (!s || typeof s !== "object" || Array.isArray(s)) s = {};
-    const merged = Object.assign({ pricePerCig: 0.6, quitDate: null, bestStreakMs: 0 }, s);
+    const merged = Object.assign({}, DEFAULT_SETTINGS, s);
+    merged.appLock = Object.assign({}, DEFAULT_SETTINGS.appLock, s.appLock && typeof s.appLock === "object" ? s.appLock : {});
     if (!Number.isFinite(merged.pricePerCig) || merged.pricePerCig < 0) merged.pricePerCig = 0.6;
     if (!Number.isFinite(merged.bestStreakMs) || merged.bestStreakMs < 0) merged.bestStreakMs = 0;
+    if (!Number.isFinite(merged.packPrice) || merged.packPrice <= 0) merged.packPrice = null;
+    if (!Number.isFinite(merged.sticksPerPack) || merged.sticksPerPack <= 0) merged.sticksPerPack = null;
+    if (!Number.isFinite(merged.cigarettesPerDay) || merged.cigarettesPerDay <= 0) merged.cigarettesPerDay = null;
+    if (!Number.isFinite(merged.currentAttemptStartedAt) || merged.currentAttemptStartedAt <= 0 || merged.currentAttemptStartedAt > Date.now()) {
+      merged.currentAttemptStartedAt = null;
+    }
     return merged;
   }
   function saveSettings(s) {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+  }
+
+  // Cost per cigarette: prefer the new pack-price model, fall back to the
+  // legacy flat pricePerCig so historical figures for existing users never
+  // change just because this version shipped (amendment section 10/11).
+  function getCostPerCig(settings) {
+    if (settings.packPrice && settings.sticksPerPack) {
+      return settings.packPrice / settings.sticksPerPack;
+    }
+    return Number(settings.pricePerCig) || 0;
+  }
+
+  // One-time defensive migration: derive currentAttemptStartedAt for users
+  // who only have legacy data (a latest cigarette log and/or a date-only
+  // quitDate). Runs once at boot; getSettings() never invents this value
+  // itself so repeated reads stay pure. Never destroys existing logs/settings.
+  function migrateIfNeeded() {
+    const settings = getSettings();
+    if (settings.currentAttemptStartedAt !== null) return;
+    const logs = getLogs();
+    let derived = null;
+    if (logs.length) {
+      derived = logs[logs.length - 1];
+    } else if (settings.quitDate) {
+      const parsed = new Date(settings.quitDate + "T00:00:00").getTime();
+      if (Number.isFinite(parsed) && parsed > 0 && parsed <= Date.now()) derived = parsed;
+    }
+    if (derived !== null) {
+      settings.currentAttemptStartedAt = derived;
+      saveSettings(settings);
+    }
+  }
+
+  // Keeps currentAttemptStartedAt in sync with the latest cigarette log
+  // whenever logs are added/removed/restored, so there is exactly one
+  // timestamp driving both the Current Streak and the Medical Timeline.
+  function syncCurrentAttemptStart(logs, settings) {
+    if (logs.length) {
+      const latest = logs[logs.length - 1];
+      if (settings.currentAttemptStartedAt !== latest) {
+        settings.currentAttemptStartedAt = latest;
+        return true;
+      }
+    }
+    return false;
   }
 
   // ---------- Content ----------
@@ -74,8 +154,6 @@
     "Pencernaan turut terjejas — risiko ulser gastrik dan refluks asid meningkat.",
     "Risiko diabetes jenis 2 meningkat akibat rintangan insulin yang lebih tinggi.",
     "Kesuburan lelaki dan perempuan turut terjejas akibat merokok.",
-    // Jangka panjang
-    "Anggaran hayat berkurangan lebih kurang 11 minit bagi setiap batang.",
   ];
 
   const CRAVING_TIPS = [
@@ -95,22 +173,52 @@
     "Anda lebih kuat daripada keinginan sementara ini.",
   ];
 
-  const MILESTONES = [
-    { t: 20 * 60, label: "20 minit", icon: "heart", desc: "Kadar denyutan jantung dan tekanan darah anda mula kembali ke paras normal." },
-    { t: 8 * 3600, label: "8 jam", icon: "droplet", desc: "Paras nikotin dalam darah menurun kira-kira 93%; paras oksigen dalam darah mula meningkat." },
-    { t: 12 * 3600, label: "12 jam", icon: "wind", desc: "Paras karbon monoksida dalam darah kembali normal — lebih banyak oksigen sampai ke organ." },
-    { t: 24 * 3600, label: "24 jam", icon: "heart", desc: "Risiko serangan jantung mula berkurangan berbanding semasa masih merokok." },
-    { t: 2 * 24 * 3600, label: "2 hari", icon: "sparkle", desc: "Hujung saraf mula tumbuh semula; deria rasa dan bau anda mula bertambah baik." },
-    { t: 3 * 24 * 3600, label: "3 hari", icon: "wind", desc: "Nikotin 100% keluar dari badan. Saluran bronkial dalam paru-paru mula relaks — bernafas lebih senang (gejala penarikan mungkin memuncak sekitar masa ini)." },
-    { t: 14 * 24 * 3600, label: "2 minggu", icon: "droplet", desc: "Peredaran darah bertambah baik dengan ketara, berjalan dan bersenam jadi lebih mudah." },
-    { t: 30 * 24 * 3600, label: "1 bulan", icon: "wind", desc: "Batuk, sesak nafas dan keletihan berkurangan; silia (bulu halus) paru-paru mula pulih." },
-    { t: 90 * 24 * 3600, label: "3 bulan", icon: "wind", desc: "Fungsi paru-paru meningkat sehingga 30%; peredaran darah terus bertambah baik." },
-    { t: 270 * 24 * 3600, label: "9 bulan", icon: "wind", desc: "Silia paru-paru pulih sepenuhnya — risiko jangkitan paru-paru berkurangan dengan ketara." },
-    { t: 365 * 24 * 3600, label: "1 tahun", icon: "heart", desc: "Risiko penyakit jantung koronari kira-kira separuh berbanding seorang perokok." },
-    { t: 5 * 365 * 24 * 3600, label: "5 tahun", icon: "shield", desc: "Arteri dan saluran darah mula mengembang semula (risiko strok berkurangan); risiko kanser mulut, tekak, esofagus dan pundi kencing berkurangan separuh." },
-    { t: 10 * 365 * 24 * 3600, label: "10 tahun", icon: "shield", desc: "Risiko kematian akibat kanser paru-paru kira-kira separuh berbanding perokok; risiko kanser laring dan pankreas turut berkurangan." },
-    { t: 15 * 365 * 24 * 3600, label: "15 tahun", icon: "heart", desc: "Risiko penyakit jantung koronari setanding seseorang yang tidak pernah merokok." },
-    { t: 20 * 365 * 24 * 3600, label: "20 tahun", icon: "shield", desc: "Risiko kematian akibat sebab berkaitan rokok (termasuk penyakit paru-paru) turun ke paras bukan perokok." },
+  // Medical Timeline (AMENDMENT 23 SEPT 2026). Evidence-based, source-
+  // attributed, deliberately conservative wording — no invented precision,
+  // no guaranteed individual outcomes. thresholdMs is in milliseconds and
+  // is the ONLY thing that drives LOCKED/NEXT/REACHED state; it always
+  // reads off the same elapsedMs as the Current Streak timer.
+  const MEDICAL_MILESTONES = [
+    { id: "20m", thresholdMs: 20 * 60 * 1000, label: "20 minit", icon: "heart",
+      title: "Denyutan jantung mula menurun.", source: "CDC/NHS" },
+    { id: "8h", thresholdMs: 8 * 3600 * 1000, label: "8 jam", icon: "droplet",
+      title: "Paras karbon monoksida mula berkurang.", source: "NHS" },
+    { id: "12h", thresholdMs: 12 * 3600 * 1000, label: "12 jam", icon: "wind",
+      title: "Karbon monoksida terus menurun.", source: "CDC" },
+    { id: "24h", thresholdMs: 24 * 3600 * 1000, label: "24 jam", icon: "heart",
+      title: "Paras nikotin dalam darah turun ke sifar.", source: "CDC" },
+    { id: "48h", thresholdMs: 48 * 3600 * 1000, label: "48 jam", icon: "sparkle",
+      title: "Deria rasa dan bau mula bertambah baik.", source: "NHS" },
+    { id: "72h", thresholdMs: 72 * 3600 * 1000, label: "72 jam", icon: "wind",
+      title: "Pernafasan mungkin terasa lebih mudah.", source: "NHS" },
+    { id: "2-12w", thresholdMs: 14 * DAY, label: "2–12 minggu", icon: "droplet",
+      title: "Peredaran darah bertambah baik.", source: "NHS/CDC" },
+    { id: "1-12mo", thresholdMs: 30 * DAY, label: "1–12 bulan", icon: "wind",
+      title: "Batuk dan sesak nafas boleh berkurang.", source: "CDC" },
+    { id: "3-9mo", thresholdMs: 90 * DAY, label: "3–9 bulan", icon: "wind",
+      title: "Masalah pernafasan boleh bertambah baik.", source: "NHS" },
+    { id: "1-2y", thresholdMs: 365 * DAY, label: "1–2 tahun", icon: "heart",
+      title: "Risiko serangan jantung turun dengan ketara.", source: "CDC" },
+    { id: "3-6y", thresholdMs: 3 * 365 * DAY, label: "3–6 tahun", icon: "heart",
+      title: "Risiko tambahan penyakit jantung koronari berkurang.", source: "CDC" },
+    { id: "5-10y", thresholdMs: 5 * 365 * DAY, label: "5–10 tahun", icon: "shield",
+      title: "Risiko strok dan beberapa kanser terus menurun.", source: "CDC" },
+    { id: "10y", thresholdMs: 10 * 365 * DAY, label: "10 tahun", icon: "shield",
+      title: "Risiko tambahan kanser paru-paru berkurang.", source: "CDC" },
+    { id: "15y", thresholdMs: 15 * 365 * DAY, label: "15 tahun", icon: "shield",
+      title: "Risiko penyakit jantung koronari menghampiri orang yang tidak merokok.", source: "CDC" },
+    { id: "20y", thresholdMs: 20 * 365 * DAY, label: "20 tahun", icon: "shield",
+      title: "Risiko beberapa kanser terus berkurang.", source: "CDC" },
+  ];
+
+  // Withdrawal is what the user may FEEL (nicotine withdrawal symptoms) —
+  // deliberately a separate, shorter timeline from long-term organ/health
+  // recovery above. Conservative wording per NHS: no guaranteed schedule.
+  const WITHDRAWAL_STAGES = [
+    { id: "now", thresholdMs: 0, label: "Sekarang", title: "Anda mungkin mengalami craving.", source: "NHS" },
+    { id: "d1-3", thresholdMs: 1 * DAY, label: "Hari 1–3", title: "Gejala withdrawal boleh menjadi lebih kuat.", source: "NHS" },
+    { id: "w1", thresholdMs: 7 * DAY, label: "Minggu pertama", title: "Craving, mudah tersinggung, gelisah dan sukar tumpu perhatian boleh berlaku.", source: "NHS" },
+    { id: "w3-4", thresholdMs: 21 * DAY, label: "3–4 minggu", title: "Bagi ramai orang, gejala withdrawal beransur-ansur berkurang.", source: "NHS" },
   ];
 
   const ICON_PATHS = {
@@ -123,8 +231,6 @@
   function iconSvg(name, cls) {
     return `<svg class="${cls}" viewBox="0 0 24 24">${ICON_PATHS[name] || ""}</svg>`;
   }
-
-  const MINUTES_LOST_PER_CIG = 11;
 
   // ---------- DOM ----------
   const $ = (id) => document.getElementById(id);
@@ -141,25 +247,22 @@
   const statWeek = $("statWeek");
   const statTotal = $("statTotal");
   const boxTotalCigs = $("boxTotalCigs");
-  const boxMinutesLost = $("boxMinutesLost");
   const boxMoneySpent = $("boxMoneySpent");
+  const boxMoneySaved = $("boxMoneySaved");
   const boxAvgDay = $("boxAvgDay");
+  const boxBestStreak = $("boxBestStreak");
   const barChart = $("barChart");
   const historyList = $("historyList");
-  const priceInput = $("priceInput");
   const quitDateInput = $("quitDateInput");
   const toastEl = $("toast");
 
-  // ---------- Reference point: last cigarette or quit date ----------
+  // ---------- Single source of truth for the active quit-attempt timer ----------
+  // currentAttemptStartedAt is the ONLY timestamp the Current Streak and the
+  // Medical Timeline read from (amendment section 1/2). Never derive a second,
+  // independent clock from quitDate/logs here — migrateIfNeeded() already
+  // folded any legacy value into currentAttemptStartedAt once, at boot.
   function getReferenceTime() {
-    const logs = getLogs();
-    const settings = getSettings();
-    const lastLog = logs.length ? logs[logs.length - 1] : null;
-    const quitDate = settings.quitDate ? new Date(settings.quitDate + "T00:00:00").getTime() : null;
-    if (lastLog && quitDate) return Math.max(lastLog, quitDate);
-    if (lastLog) return lastLog;
-    if (quitDate) return quitDate;
-    return null;
+    return getSettings().currentAttemptStartedAt;
   }
 
   function pad(n) { return String(n).padStart(2, "0"); }
@@ -182,8 +285,9 @@
       heroSub.textContent = "Tekan butang di bawah untuk mula menjejak.";
       undoBtn.classList.add("hidden");
       bestStreakBadge.classList.add("hidden");
-      updateMilestone(null);
-      renderFullTimeline(0);
+      updateMilestoneSummary(null);
+      renderMedicalTimeline(null);
+      renderWithdrawalTimeline(null);
       return;
     }
     const elapsedMs = Date.now() - ref;
@@ -194,14 +298,15 @@
       ? `Sejak log terakhir · ${logs.length} rokok direkodkan keseluruhan`
       : "Sejak tarikh berhenti ditetapkan";
     undoBtn.classList.toggle("hidden", logs.length === 0);
-    updateMilestone(elapsedMs / 1000);
-    renderFullTimeline(elapsedMs / 1000);
-    updateBestStreak(elapsedMs);
+    updateMilestoneSummary(elapsedMs);
+    renderMedicalTimeline(elapsedMs);
+    renderWithdrawalTimeline(elapsedMs);
+    updateBestStreakDisplay(elapsedMs);
   }
 
-  // Best streak = the longest interval ever reached between consecutive
-  // logs, including the streak currently in progress. A relapse must never
-  // erase this — it only resets the *current* streak (see getReferenceTime).
+  // ---------- Best streak (optimized: in-memory each tick, persisted only
+  // on meaningful events — amendment section 4. Never written every second). ----------
+  let bestStreakMemory = null;
   function formatDurationShort(ms) {
     const totalMin = Math.floor(ms / 60000);
     const days = Math.floor(totalMin / 1440);
@@ -211,53 +316,73 @@
     if (hours > 0) return `${hours} jam ${mins} minit`;
     return `${mins} minit`;
   }
-  function updateBestStreak(currentStreakMs) {
-    const settings = getSettings();
-    if (currentStreakMs > settings.bestStreakMs) {
-      settings.bestStreakMs = currentStreakMs;
-      saveSettings(settings);
-    }
-    if (settings.bestStreakMs > 60000) {
-      bestStreakValue.textContent = formatDurationShort(settings.bestStreakMs);
+  function updateBestStreakDisplay(currentStreakMs) {
+    if (bestStreakMemory === null) bestStreakMemory = getSettings().bestStreakMs;
+    if (currentStreakMs > bestStreakMemory) bestStreakMemory = currentStreakMs;
+    if (bestStreakMemory > 60000) {
+      bestStreakValue.textContent = formatDurationShort(bestStreakMemory);
       bestStreakBadge.classList.remove("hidden");
+      if (boxBestStreak) boxBestStreak.textContent = formatDurationShort(bestStreakMemory);
     } else {
       bestStreakBadge.classList.add("hidden");
+      if (boxBestStreak) boxBestStreak.textContent = "—";
     }
   }
+  // Call at meaningful events only: init, confirmed log, history edit,
+  // import, beforeunload — NOT from the per-second timer tick.
+  function persistBestStreak() {
+    const settings = getSettings();
+    if (bestStreakMemory !== null && bestStreakMemory > settings.bestStreakMs) {
+      settings.bestStreakMs = bestStreakMemory;
+      saveSettings(settings);
+      return true;
+    }
+    return false;
+  }
 
-  function updateMilestone(elapsedSec) {
-    if (elapsedSec === null) {
+  // ---------- Medical Timeline milestone state ----------
+  // LOCKED / NEXT / REACHED, all derived from the same elapsedMs as the
+  // Current Streak (amendment section 3/5).
+  function milestoneState(thresholdMs, elapsedMs, nextAssigned) {
+    if (elapsedMs >= thresholdMs) return "reached";
+    if (!nextAssigned.done) { nextAssigned.done = true; return "next"; }
+    return "locked";
+  }
+
+  function updateMilestoneSummary(elapsedMs) {
+    if (elapsedMs === null) {
       milestoneEta.textContent = "—";
       milestoneProgress.style.width = "0%";
       milestoneDesc.textContent = "Log rokok pertama atau tetapkan tarikh berhenti untuk mula menjejak kebaikan badan anda.";
       return;
     }
-    let next = MILESTONES.find((m) => m.t > elapsedSec);
+    const next = MEDICAL_MILESTONES.find((m) => m.thresholdMs > elapsedMs);
     if (!next) {
       milestoneEta.textContent = "Semua tahap dicapai";
       milestoneProgress.style.width = "100%";
-      milestoneDesc.textContent = "Luar biasa! Anda telah mencapai semua tahap kesihatan utama. Teruskan begini.";
+      milestoneDesc.textContent = "Anda telah mencapai semua tahap dalam Garis Masa Perubatan. Teruskan begini.";
       return;
     }
-    const prevT = [...MILESTONES].reverse().find((m) => m.t <= elapsedSec)?.t ?? 0;
-    const pct = Math.min(100, Math.max(0, ((elapsedSec - prevT) / (next.t - prevT)) * 100));
+    const prevMs = [...MEDICAL_MILESTONES].reverse().find((m) => m.thresholdMs <= elapsedMs)?.thresholdMs ?? 0;
+    const pct = Math.min(100, Math.max(0, ((elapsedMs - prevMs) / (next.thresholdMs - prevMs)) * 100));
     milestoneProgress.style.width = pct.toFixed(1) + "%";
-    const remain = next.t - elapsedSec;
-    milestoneEta.textContent = `${next.label} · baki ${formatDuration(remain * 1000)}`;
-    milestoneDesc.textContent = next.desc;
+    const remain = next.thresholdMs - elapsedMs;
+    milestoneEta.textContent = `${next.label} · baki ${formatDuration(remain)}`;
+    milestoneDesc.textContent = next.title;
   }
 
-  // ---------- Full medical timeline ----------
+  // ---------- Full medical timeline (organ/health recovery) ----------
   const timelineList = $("timelineList");
   let timelineBuilt = false;
+  const STATE_BADGE = { reached: "DICAPAI", next: "SETERUSNYA", locked: "BELUM SAMPAI" };
 
-  function renderFullTimeline(elapsedSec) {
+  function renderMedicalTimeline(elapsedMs) {
     if (!timelineList) return;
     const rows = timelineList.querySelectorAll(".timeline-item");
 
-    if (!timelineBuilt || rows.length !== MILESTONES.length) {
-      timelineList.innerHTML = MILESTONES.map((m) => `
-        <div class="timeline-item" data-t="${m.t}">
+    if (!timelineBuilt || rows.length !== MEDICAL_MILESTONES.length) {
+      timelineList.innerHTML = MEDICAL_MILESTONES.map((m) => `
+        <div class="timeline-item" data-id="${m.id}">
           <div class="timeline-marker">
             <span class="timeline-dot"></span>
             <span class="timeline-line"></span>
@@ -266,10 +391,12 @@
             <div class="timeline-row">
               ${iconSvg(m.icon, "timeline-icon")}
               <span class="timeline-time">${m.label}</span>
+              <span class="timeline-state-badge"></span>
             </div>
-            <p class="timeline-desc">${m.desc}</p>
+            <p class="timeline-desc">${m.title}</p>
             <div class="timeline-mini-progress hidden"><div class="timeline-mini-fill" style="width:0%"></div></div>
             <span class="timeline-remain hidden"></span>
+            <span class="timeline-source">Sumber: ${m.source}</span>
           </div>
         </div>
       `).join("");
@@ -277,32 +404,65 @@
     }
 
     const items = timelineList.querySelectorAll(".timeline-item");
-    let prevT = 0;
-    let currentAssigned = false;
+    const nextAssigned = { done: false };
+    let prevMs = 0;
     items.forEach((item, i) => {
-      const m = MILESTONES[i];
+      const m = MEDICAL_MILESTONES[i];
       const fill = item.querySelector(".timeline-mini-fill");
       const progressWrap = item.querySelector(".timeline-mini-progress");
       const remainEl = item.querySelector(".timeline-remain");
+      const badgeEl = item.querySelector(".timeline-state-badge");
+      const state = elapsedMs === null ? "locked" : milestoneState(m.thresholdMs, elapsedMs, nextAssigned);
 
-      if (m.t <= elapsedSec) {
-        item.className = "timeline-item achieved";
-        progressWrap.classList.add("hidden");
-        remainEl.classList.add("hidden");
-      } else if (!currentAssigned) {
-        item.className = "timeline-item current";
-        currentAssigned = true;
-        const pct = Math.min(100, Math.max(0, ((elapsedSec - prevT) / (m.t - prevT)) * 100));
+      item.className = "timeline-item " + state;
+      badgeEl.textContent = STATE_BADGE[state];
+      if (state === "next" && elapsedMs !== null) {
+        const pct = Math.min(100, Math.max(0, ((elapsedMs - prevMs) / (m.thresholdMs - prevMs)) * 100));
         fill.style.width = pct.toFixed(1) + "%";
         progressWrap.classList.remove("hidden");
-        remainEl.textContent = `Baki ${formatDuration((m.t - elapsedSec) * 1000)}`;
+        remainEl.textContent = `Baki ${formatDuration(m.thresholdMs - elapsedMs)}`;
         remainEl.classList.remove("hidden");
       } else {
-        item.className = "timeline-item upcoming";
         progressWrap.classList.add("hidden");
         remainEl.classList.add("hidden");
       }
-      prevT = m.t;
+      prevMs = m.thresholdMs;
+    });
+  }
+
+  // ---------- Withdrawal timeline (separate from organ/health recovery) ----------
+  const withdrawalList = $("withdrawalList");
+  let withdrawalBuilt = false;
+
+  function renderWithdrawalTimeline(elapsedMs) {
+    if (!withdrawalList) return;
+    if (!withdrawalBuilt) {
+      withdrawalList.innerHTML = WITHDRAWAL_STAGES.map((m) => `
+        <div class="timeline-item withdrawal-item" data-id="${m.id}">
+          <div class="timeline-marker">
+            <span class="timeline-dot"></span>
+            <span class="timeline-line"></span>
+          </div>
+          <div class="timeline-content">
+            <div class="timeline-row">
+              <span class="timeline-time">${m.label}</span>
+              <span class="timeline-state-badge"></span>
+            </div>
+            <p class="timeline-desc">${m.title}</p>
+            <span class="timeline-source">Sumber: ${m.source}</span>
+          </div>
+        </div>
+      `).join("");
+      withdrawalBuilt = true;
+    }
+    const items = withdrawalList.querySelectorAll(".timeline-item");
+    const nextAssigned = { done: false };
+    items.forEach((item, i) => {
+      const m = WITHDRAWAL_STAGES[i];
+      const badgeEl = item.querySelector(".timeline-state-badge");
+      const state = elapsedMs === null ? "locked" : milestoneState(m.thresholdMs, elapsedMs, nextAssigned);
+      item.className = "timeline-item withdrawal-item " + state;
+      badgeEl.textContent = STATE_BADGE[state];
     });
   }
 
@@ -327,10 +487,26 @@
     statWeek.textContent = weekCount;
     statTotal.textContent = logs.length;
 
+    const costPerCig = getCostPerCig(settings);
     boxTotalCigs.textContent = logs.length;
-    boxMinutesLost.textContent = (logs.length * MINUTES_LOST_PER_CIG).toLocaleString("ms-MY");
-    boxMoneySpent.textContent = "RM" + (logs.length * (Number(settings.pricePerCig) || 0)).toFixed(2);
+    boxMoneySpent.textContent = "RM" + (logs.length * costPerCig).toFixed(2);
     boxAvgDay.textContent = (weekCount / 7).toFixed(1);
+    if (boxBestStreak) boxBestStreak.textContent = bestStreakMemory !== null ? formatDurationShort(bestStreakMemory) : formatDurationShort(settings.bestStreakMs);
+
+    // Money saved is a separate estimate from money spent (amendment
+    // section 12) — only shown when the user has given a daily baseline.
+    if (boxMoneySaved) {
+      if (settings.cigarettesPerDay) {
+        const trackingStart = logs.length ? logs[0] : settings.currentAttemptStartedAt;
+        const smokeFreeDays = trackingStart ? Math.max(0, (now - trackingStart) / DAY) : 0;
+        const expectedCigarettes = settings.cigarettesPerDay * smokeFreeDays;
+        const cigarettesAvoided = Math.max(0, expectedCigarettes - logs.length);
+        const moneySaved = cigarettesAvoided * costPerCig;
+        boxMoneySaved.textContent = "RM" + moneySaved.toFixed(2);
+      } else {
+        boxMoneySaved.textContent = "—";
+      }
+    }
 
     renderBarChart(logs, todayStart);
     renderHistory(logs);
@@ -384,8 +560,11 @@
       historyList.innerHTML = `<p class="empty-note">Belum ada log lagi.</p>`;
       return;
     }
-    const recent = [...logs].reverse().slice(0, 30);
-    recent.forEach((ts) => {
+    // logs is ascending-sorted; capture each row's exact index in THAT array
+    // (not the timestamp value) so deleting one entry can never remove a
+    // second one that happens to share the same millisecond.
+    const recentWithIdx = logs.map((ts, idx) => ({ ts, idx })).reverse().slice(0, 30);
+    recentWithIdx.forEach(({ ts, idx }) => {
       const item = document.createElement("div");
       item.className = "history-item";
       const d = new Date(ts);
@@ -395,22 +574,28 @@
           <div class="history-item-time">${timeStr}</div>
           <div class="history-item-ago">${timeAgoLabel(ts)}</div>
         </div>
-        <button class="history-del" data-ts="${ts}" type="button" aria-label="Padam"><svg class="del-icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button class="history-del" data-idx="${idx}" type="button" aria-label="Padam log ${timeStr}"><svg class="del-icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       `;
       historyList.appendChild(item);
     });
     historyList.querySelectorAll(".history-del").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const ts = Number(btn.getAttribute("data-ts"));
-        const logs2 = getLogs().filter((t) => t !== ts);
+        const idx = Number(btn.getAttribute("data-idx"));
+        const logs2 = getLogs();
+        const [removedTs] = logs2.splice(idx, 1);
         saveLogs(logs2);
+        const settings = getSettings();
+        if (syncCurrentAttemptStart(logs2, settings) || persistBestStreak()) saveSettings(settings);
         refreshAll();
         showToast("Log dipadam", {
           label: "Buat asal",
           onClick: () => {
             const restored = getLogs();
-            restored.push(ts);
+            restored.push(removedTs);
+            restored.sort((a, b) => a - b);
             saveLogs(restored);
+            const s2 = getSettings();
+            if (syncCurrentAttemptStart(restored, s2)) saveSettings(s2);
             refreshAll();
           },
         });
@@ -471,9 +656,21 @@
   function confirmLogCigarette() {
     if (logActionLocked) return;
     logActionLocked = true;
+    // Capture the streak that's ENDING right now as a best-streak candidate
+    // before it resets, so a relapse never loses a record that was in
+    // progress (amendment section 4/section 1 "Best streak remains").
+    const prevRef = getReferenceTime();
+    if (prevRef) updateBestStreakDisplay(Date.now() - prevRef);
+    persistBestStreak();
+
+    const now = Date.now();
     const logs = getLogs();
-    logs.push(Date.now());
+    logs.push(now);
     saveLogs(logs);
+    const settings = getSettings();
+    settings.currentAttemptStartedAt = now; // the one canonical timer source
+    saveSettings(settings);
+
     closeLogConfirm();
     refreshAll();
     showDamageModal();
@@ -497,6 +694,12 @@
     if (!logs.length) return;
     const removed = logs.pop();
     saveLogs(logs);
+    const settings = getSettings();
+    // The attempt that was "current" belonged to the log we just removed —
+    // fall back to whichever log is now latest (or leave the prior value
+    // untouched if none remain; see syncCurrentAttemptStart).
+    syncCurrentAttemptStart(logs, settings);
+    saveSettings(settings);
     refreshAll();
     showToast("Log terakhir dipadam", {
       label: "Buat asal",
@@ -504,6 +707,9 @@
         const restored = getLogs();
         restored.push(removed);
         saveLogs(restored);
+        const s2 = getSettings();
+        syncCurrentAttemptStart(restored, s2);
+        saveSettings(s2);
         refreshAll();
       },
     });
@@ -539,38 +745,96 @@
     $("quoteBox").textContent = QUOTES[Math.floor(Math.random() * QUOTES.length)];
   }
 
-  // ---------- Settings ----------
+  // ---------- Settings: pack-price money model (amendment section 9/10) ----------
+  const packPriceInput = $("packPriceInput");
+  const sticksPerPackInput = $("sticksPerPackInput");
+  const costPerCigDisplay = $("costPerCigDisplay");
+  const cigsPerDayInput = $("cigsPerDayInput");
+
   function loadSettingsIntoForm() {
     const s = getSettings();
-    priceInput.value = s.pricePerCig ?? "";
+    packPriceInput.value = s.packPrice ?? "";
+    sticksPerPackInput.value = s.sticksPerPack ?? "";
+    cigsPerDayInput.value = s.cigarettesPerDay ?? "";
+    costPerCigDisplay.textContent = "RM" + getCostPerCig(s).toFixed(2);
     quitDateInput.value = s.quitDate ?? "";
   }
-  priceInput?.addEventListener("change", () => {
+
+  function savePackPriceModel() {
     const s = getSettings();
-    s.pricePerCig = Number(priceInput.value) || 0;
+    const pp = Number(packPriceInput.value);
+    const spp = Number(sticksPerPackInput.value);
+    s.packPrice = Number.isFinite(pp) && pp > 0 ? pp : null;
+    s.sticksPerPack = Number.isFinite(spp) && spp > 0 ? spp : null;
+    saveSettings(s);
+    costPerCigDisplay.textContent = "RM" + getCostPerCig(s).toFixed(2);
+    refreshAll();
+  }
+  packPriceInput?.addEventListener("change", savePackPriceModel);
+  sticksPerPackInput?.addEventListener("change", savePackPriceModel);
+
+  cigsPerDayInput?.addEventListener("change", () => {
+    const s = getSettings();
+    const v = Number(cigsPerDayInput.value);
+    s.cigarettesPerDay = Number.isFinite(v) && v > 0 ? v : null;
     saveSettings(s);
     refreshAll();
   });
+
+  // Picking a quit-start date is a deliberate action to (re)start the
+  // active quit attempt — it writes the SAME canonical timestamp the timer
+  // and Medical Timeline read from. quitDate itself is kept only as the
+  // legacy/migration record (amendment section 2).
   quitDateInput?.addEventListener("change", () => {
     const s = getSettings();
-    s.quitDate = quitDateInput.value || null;
+    const val = quitDateInput.value;
+    if (!val) { s.quitDate = null; saveSettings(s); return; }
+    const parsed = new Date(val + "T00:00:00").getTime();
+    if (!Number.isFinite(parsed) || parsed > Date.now()) {
+      showToast("Tarikh tidak sah");
+      quitDateInput.value = s.quitDate ?? "";
+      return;
+    }
+    persistBestStreak();
+    bestStreakMemory = null;
+    s.quitDate = val;
+    s.currentAttemptStartedAt = parsed;
     saveSettings(s);
     refreshAll();
   });
 
+  // ---------- Reset (type-to-confirm, amendment section 16) ----------
+  const resetConfirmModal = $("resetConfirmModal");
+  const resetConfirmInput = $("resetConfirmInput");
+  const resetConfirmSubmit = $("resetConfirmSubmit");
+  const resetConfirmCancel = $("resetConfirmCancel");
+
   $("resetBtn")?.addEventListener("click", () => {
-    if (confirm("Padam SEMUA data log dan tetapan? Tindakan ini tidak boleh diundur. Pertimbangkan untuk Eksport dahulu.")) {
-      localStorage.removeItem(LOGS_KEY);
-      localStorage.removeItem(SETTINGS_KEY);
-      loadSettingsIntoForm();
-      refreshAll();
-      showToast("Semua data telah direset");
-    }
+    resetConfirmInput.value = "";
+    resetConfirmSubmit.disabled = true;
+    resetConfirmModal.classList.remove("hidden");
+    setTimeout(() => resetConfirmInput.focus(), 50);
+  });
+  resetConfirmInput?.addEventListener("input", () => {
+    resetConfirmSubmit.disabled = resetConfirmInput.value !== "RESET";
+  });
+  resetConfirmCancel?.addEventListener("click", () => resetConfirmModal.classList.add("hidden"));
+  resetConfirmSubmit?.addEventListener("click", () => {
+    if (resetConfirmInput.value !== "RESET") return;
+    localStorage.removeItem(LOGS_KEY);
+    localStorage.removeItem(SETTINGS_KEY);
+    bestStreakMemory = null;
+    resetConfirmModal.classList.add("hidden");
+    loadSettingsIntoForm();
+    refreshAll();
+    showToast("Semua data telah direset");
   });
 
-  // ---------- Export / Import ----------
+  // ---------- Export / Import (amendment section 15) ----------
   $("exportBtn")?.addEventListener("click", () => {
+    persistBestStreak();
     const payload = {
+      schemaVersion: SCHEMA_VERSION,
       exportedAt: new Date().toISOString(),
       logs: getLogs(),
       settings: getSettings(),
@@ -603,10 +867,20 @@
         importFileInput.value = "";
         return;
       }
+      if (!parsed || typeof parsed !== "object") {
+        showToast("Fail tidak mengandungi data LastCall yang sah");
+        importFileInput.value = "";
+        return;
+      }
+      // schemaVersion may be absent on backups exported before this field
+      // existed — treat that as legacy v1 and still accept it.
+      const now = Date.now();
       const incomingLogs = Array.isArray(parsed.logs)
-        ? parsed.logs.filter((t) => typeof t === "number" && Number.isFinite(t) && t > 0)
+        ? parsed.logs.filter((t) => typeof t === "number" && Number.isFinite(t) && t > 0 && t <= now)
         : null;
-      const incomingSettings = parsed.settings && typeof parsed.settings === "object" ? parsed.settings : null;
+      const incomingSettings = parsed.settings && typeof parsed.settings === "object" && !Array.isArray(parsed.settings)
+        ? parsed.settings
+        : null;
       if (!incomingLogs && !incomingSettings) {
         showToast("Fail tidak mengandungi data LastCall yang sah");
         importFileInput.value = "";
@@ -616,8 +890,15 @@
         importFileInput.value = "";
         return;
       }
-      if (incomingLogs) saveLogs(incomingLogs.sort((a, b) => a - b));
-      if (incomingSettings) saveSettings(Object.assign(getSettings(), incomingSettings));
+      const sortedLogs = incomingLogs ? incomingLogs.sort((a, b) => a - b) : getLogs();
+      if (incomingLogs) saveLogs(sortedLogs);
+      // Merge onto sanitized current settings so legacy fields the import
+      // doesn't mention (or an app-lock PIN hash it shouldn't overwrite
+      // blindly) survive; getSettings() re-sanitizes everything afterward.
+      const mergedSettings = Object.assign(getSettings(), incomingSettings || {});
+      syncCurrentAttemptStart(sortedLogs, mergedSettings);
+      saveSettings(mergedSettings);
+      bestStreakMemory = null;
       loadSettingsIntoForm();
       refreshAll();
       showToast("Data berjaya dipulihkan");
@@ -749,22 +1030,275 @@
     refreshStats();
   }
 
+  migrateIfNeeded();
   setInterval(updateHero, 1000);
   refreshAll();
   loadSettingsIntoForm();
+  persistBestStreak();
+  window.addEventListener("beforeunload", persistBestStreak);
 
   // ---------- Intro splash ----------
   // First paint already has real data by now (refreshAll ran above), so the
   // splash isn't hiding a blank/loading state — it's a short branded beat
-  // before the app underneath is revealed.
+  // before the app underneath is revealed. Skipped entirely when App Lock
+  // must show first (privacy takes priority over the branded beat).
   const splashScreen = $("splashScreen");
-  if (splashScreen) {
+  function playSplash() {
+    if (!splashScreen) return;
     setTimeout(() => {
       splashScreen.classList.add("splash-out");
       splashScreen.addEventListener("transitionend", () => splashScreen.remove(), { once: true });
       setTimeout(() => splashScreen.remove(), 800); // fallback if transitionend never fires
     }, 1100);
   }
+
+  // ---------- App Lock (sections 24-29) ----------
+  // Client-side privacy lock, not banking-level security: a salted SHA-256
+  // hash of the PIN is stored via Web Crypto, never the PIN itself.
+  const lockScreen = $("lockScreen");
+  const lockPinDots = $("lockPinDots");
+  const lockTitle = $("lockTitle");
+  const lockSubtitle = $("lockSubtitle");
+  const lockError = $("lockError");
+  const lockKeypad = $("lockKeypad");
+  const lockForgotBtn = $("lockForgotBtn");
+  const lockRecoveryPanel = $("lockRecoveryPanel");
+  const lockRecoveryConfirm = $("lockRecoveryConfirm");
+  const lockRecoveryCancel = $("lockRecoveryCancel");
+  const appLockToggle = $("appLockToggle");
+  const appLockTimeoutSelect = $("appLockTimeoutSelect");
+  const appLockTimeoutRow = $("appLockTimeoutRow");
+  const appLockChangePinBtn = $("appLockChangePinBtn");
+
+  let pinBuffer = "";
+  let pinMode = null; // null = unlock; "setup-first" / "setup-confirm" during setup
+  let pinFirstEntry = null;
+
+  async function sha256Hex(text) {
+    const enc = new TextEncoder().encode(text);
+    const buf = await crypto.subtle.digest("SHA-256", enc);
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  function randomSaltHex() {
+    const arr = crypto.getRandomValues(new Uint8Array(16));
+    return Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  function hashPin(pin, saltHex) {
+    return sha256Hex(saltHex + ":" + pin);
+  }
+
+  function lockTimeoutMs(settings) {
+    const map = { 0: 0, 1: 60000, 5: 300000, 15: 900000 };
+    return map[settings.appLock.timeoutMin] ?? 300000;
+  }
+  // A page reload / fresh launch has no memory of "still unlocked" — the
+  // JS session itself is gone, so it always re-asks for the PIN. The
+  // configurable timeout only governs returning from the background
+  // WITHOUT a reload (visibilitychange, same still-alive tab/session).
+  function shouldRequireUnlockOnBoot() {
+    return getSettings().appLock.enabled;
+  }
+  function shouldRequireUnlockOnResume() {
+    const settings = getSettings();
+    if (!settings.appLock.enabled) return false;
+    const last = settings.appLock.lastUnlockedAt;
+    if (!last) return true;
+    return Date.now() - last > lockTimeoutMs(settings);
+  }
+
+  function renderPinDots() {
+    if (!lockPinDots) return;
+    const expected = pinMode ? Math.max(pinBuffer.length, 4) : (getSettings().appLock.pinLength || 4);
+    lockPinDots.innerHTML = "";
+    for (let i = 0; i < Math.max(expected, pinBuffer.length); i++) {
+      const dot = document.createElement("span");
+      dot.className = "lock-pin-dot" + (i < pinBuffer.length ? " filled" : "");
+      lockPinDots.appendChild(dot);
+    }
+  }
+  function updateLockTitle() {
+    if (!lockTitle) return;
+    if (pinMode === "setup-first") { lockTitle.textContent = "Tetapkan PIN"; lockSubtitle.textContent = "Masukkan 4–6 digit PIN baharu"; }
+    else if (pinMode === "setup-confirm") { lockTitle.textContent = "Sahkan PIN"; lockSubtitle.textContent = "Masukkan semula PIN yang sama"; }
+    else { lockTitle.textContent = "LastCall dikunci"; lockSubtitle.textContent = "Masukkan PIN untuk teruskan"; }
+    $("lockEnterBtn")?.classList.toggle("hidden", !pinMode);
+  }
+  function showLockError(msg) {
+    if (!lockError) return;
+    lockError.textContent = msg;
+    lockError.classList.remove("hidden");
+    lockScreen.classList.add("lock-shake");
+    setTimeout(() => lockScreen.classList.remove("lock-shake"), 400);
+  }
+
+  function showLockScreen(mode) {
+    pinMode = mode;
+    pinBuffer = "";
+    pinFirstEntry = null;
+    lockError?.classList.add("hidden");
+    lockRecoveryPanel?.classList.add("hidden");
+    updateLockTitle();
+    renderPinDots();
+    lockScreen.classList.remove("hidden");
+    requestAnimationFrame(() => lockScreen.classList.add("active"));
+  }
+  function hideLockScreen() {
+    lockScreen.classList.add("lock-unlocked");
+    setTimeout(() => {
+      lockScreen.classList.remove("active", "lock-unlocked");
+      lockScreen.classList.add("hidden");
+    }, 220);
+  }
+
+  async function attemptUnlock() {
+    const settings = getSettings();
+    if (settings.appLock.lockoutUntil && Date.now() < settings.appLock.lockoutUntil) {
+      showLockError(`Cuba lagi dalam ${Math.ceil((settings.appLock.lockoutUntil - Date.now()) / 1000)}s`);
+      pinBuffer = "";
+      renderPinDots();
+      return;
+    }
+    const hash = await hashPin(pinBuffer, settings.appLock.saltHex);
+    if (hash === settings.appLock.hashHex) {
+      settings.appLock.failedAttempts = 0;
+      settings.appLock.lockoutUntil = 0;
+      settings.appLock.lastUnlockedAt = Date.now();
+      saveSettings(settings);
+      hideLockScreen();
+      playSplash();
+    } else {
+      // Progressive brute-force delay (section 25): mild → longer, never
+      // permanent — a "Forgot PIN?" recovery path always stays reachable.
+      settings.appLock.failedAttempts = (settings.appLock.failedAttempts || 0) + 1;
+      const delays = [0, 0, 0, 5000, 10000, 20000, 30000];
+      const idx = Math.min(settings.appLock.failedAttempts, delays.length - 1);
+      settings.appLock.lockoutUntil = delays[idx] ? Date.now() + delays[idx] : 0;
+      saveSettings(settings);
+      showLockError("PIN salah");
+      pinBuffer = "";
+      renderPinDots();
+    }
+  }
+
+  function handleSetupNext() {
+    if (pinBuffer.length < 4) return;
+    if (pinMode === "setup-first") {
+      pinFirstEntry = pinBuffer;
+      pinBuffer = "";
+      pinMode = "setup-confirm";
+      updateLockTitle();
+      renderPinDots();
+    } else if (pinMode === "setup-confirm") {
+      if (pinBuffer !== pinFirstEntry) {
+        showLockError("PIN tidak sepadan — cuba lagi");
+        pinMode = "setup-first";
+        pinBuffer = "";
+        pinFirstEntry = null;
+        updateLockTitle();
+        renderPinDots();
+        return;
+      }
+      finalizeSetup(pinFirstEntry);
+    }
+  }
+
+  async function finalizeSetup(pin) {
+    const settings = getSettings();
+    const saltHex = randomSaltHex();
+    settings.appLock.enabled = true;
+    settings.appLock.saltHex = saltHex;
+    settings.appLock.hashHex = await hashPin(pin, saltHex);
+    settings.appLock.pinLength = pin.length;
+    settings.appLock.failedAttempts = 0;
+    settings.appLock.lockoutUntil = 0;
+    settings.appLock.lastUnlockedAt = Date.now();
+    saveSettings(settings);
+    hideLockScreen();
+    refreshAppLockUI();
+    showToast("App Lock diaktifkan");
+  }
+
+  function handleLockDigit(d) {
+    const maxLen = pinMode ? 6 : (getSettings().appLock.pinLength || 6);
+    if (pinBuffer.length >= maxLen) return;
+    pinBuffer += d;
+    lockError?.classList.add("hidden");
+    renderPinDots();
+    if (!pinMode) {
+      const expected = getSettings().appLock.pinLength || 4;
+      if (pinBuffer.length === expected) attemptUnlock();
+    } else if (pinBuffer.length === 6) {
+      handleSetupNext();
+    }
+  }
+  function handleLockBackspace() {
+    pinBuffer = pinBuffer.slice(0, -1);
+    renderPinDots();
+  }
+
+  lockKeypad?.addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    if (btn.dataset.digit !== undefined) handleLockDigit(btn.dataset.digit);
+    else if (btn.dataset.action === "back") handleLockBackspace();
+    else if (btn.dataset.action === "enter") handleSetupNext();
+  });
+
+  lockForgotBtn?.addEventListener("click", () => lockRecoveryPanel?.classList.remove("hidden"));
+  lockRecoveryCancel?.addEventListener("click", () => lockRecoveryPanel?.classList.add("hidden"));
+  lockRecoveryConfirm?.addEventListener("click", () => {
+    // Resetting the PIN never touches cigarette history/settings — only
+    // the appLock block itself (section 26).
+    const settings = getSettings();
+    settings.appLock = Object.assign({}, DEFAULT_SETTINGS.appLock);
+    saveSettings(settings);
+    hideLockScreen();
+    refreshAppLockUI();
+    playSplash();
+    showToast("App Lock telah direset");
+  });
+
+  function refreshAppLockUI() {
+    const settings = getSettings();
+    if (appLockToggle) appLockToggle.checked = settings.appLock.enabled;
+    if (appLockTimeoutSelect) appLockTimeoutSelect.value = String(settings.appLock.timeoutMin);
+    appLockTimeoutRow?.classList.toggle("hidden", !settings.appLock.enabled);
+    appLockChangePinBtn?.classList.toggle("hidden", !settings.appLock.enabled);
+  }
+
+  appLockToggle?.addEventListener("change", () => {
+    if (appLockToggle.checked) {
+      appLockToggle.checked = false; // stays off until setup actually completes
+      showLockScreen("setup-first");
+    } else {
+      const settings = getSettings();
+      settings.appLock = Object.assign({}, DEFAULT_SETTINGS.appLock);
+      saveSettings(settings);
+      refreshAppLockUI();
+      showToast("App Lock dimatikan");
+    }
+  });
+  appLockChangePinBtn?.addEventListener("click", () => showLockScreen("setup-first"));
+  appLockTimeoutSelect?.addEventListener("change", () => {
+    const settings = getSettings();
+    settings.appLock.timeoutMin = Number(appLockTimeoutSelect.value);
+    saveSettings(settings);
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && shouldRequireUnlockOnResume()) showLockScreen(null);
+  });
+
+  // Decide, before anything else paints meaningfully, whether privacy
+  // (lock screen) or the branded splash goes first.
+  if (shouldRequireUnlockOnBoot()) {
+    splashScreen?.remove();
+    showLockScreen(null);
+  } else {
+    lockScreen?.classList.add("hidden");
+    playSplash();
+  }
+  refreshAppLockUI();
 
   // ---------- Service worker ----------
   if ("serviceWorker" in navigator) {

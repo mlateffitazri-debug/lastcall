@@ -31,6 +31,48 @@
   <span class="splash-tagline">Your quit smoking companion</span>
 </div>
 
+<!-- App Lock screen — shown BEFORE the app underneath whenever App Lock is
+     enabled and the timeout has passed. Hidden by default; app.js decides
+     synchronously (before first paint) whether to reveal it. -->
+<div id="lockScreen" class="lock-screen hidden" aria-hidden="true">
+  <div class="lock-content">
+    <img class="lock-logo" src="icons/logo-96-transparent.png" alt="LastCall">
+    <h2 class="lock-title" id="lockTitle">LastCall dikunci</h2>
+    <p class="lock-subtitle" id="lockSubtitle">Masukkan PIN untuk teruskan</p>
+    <div class="lock-pin-dots" id="lockPinDots"></div>
+    <p class="lock-error hidden" id="lockError" role="alert">PIN salah</p>
+
+    <div class="lock-keypad" id="lockKeypad">
+      <button type="button" class="lock-key" data-digit="1" aria-label="1">1</button>
+      <button type="button" class="lock-key" data-digit="2" aria-label="2">2</button>
+      <button type="button" class="lock-key" data-digit="3" aria-label="3">3</button>
+      <button type="button" class="lock-key" data-digit="4" aria-label="4">4</button>
+      <button type="button" class="lock-key" data-digit="5" aria-label="5">5</button>
+      <button type="button" class="lock-key" data-digit="6" aria-label="6">6</button>
+      <button type="button" class="lock-key" data-digit="7" aria-label="7">7</button>
+      <button type="button" class="lock-key" data-digit="8" aria-label="8">8</button>
+      <button type="button" class="lock-key" data-digit="9" aria-label="9">9</button>
+      <button type="button" class="lock-key lock-key-ghost" id="lockEnterBtn" data-action="enter" aria-label="Sahkan PIN">
+        <svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>
+      </button>
+      <button type="button" class="lock-key" data-digit="0" aria-label="0">0</button>
+      <button type="button" class="lock-key lock-key-ghost" data-action="back" aria-label="Padam digit">
+        <svg viewBox="0 0 24 24"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
+      </button>
+    </div>
+
+    <button type="button" class="lock-forgot-btn" id="lockForgotBtn">Terlupa PIN?</button>
+
+    <div class="lock-recovery-panel hidden" id="lockRecoveryPanel">
+      <p class="lock-recovery-text">PIN ini hanya digunakan untuk mengunci aplikasi pada peranti ini. Reset akan membuang PIN semasa — data rokok anda TIDAK akan dipadam.</p>
+      <div class="confirm-log-actions">
+        <button type="button" class="confirm-log-cancel" id="lockRecoveryCancel">Batal</button>
+        <button type="button" class="confirm-log-yes" id="lockRecoveryConfirm">Reset App Lock</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="app">
 
   <header class="topbar">
@@ -118,9 +160,15 @@
     <!-- ================= TIMELINE ================= -->
     <section id="view-timeline" class="view">
       <h2 class="view-title">Garis Masa Perubatan</h2>
-      <p class="timeline-intro">Senarai penuh perubahan badan anda sejak rokok terakhir, berdasarkan data kesihatan CDC &amp; WHO.</p>
+      <p class="timeline-intro">Setiap tahap dikira daripada masa yang sama dengan jam utama anda. Berdasarkan data CDC &amp; NHS — anggaran umum, bukan jaminan hasil individu.</p>
       <div class="timeline-card" id="timelineCard">
         <div class="timeline-list" id="timelineList"></div>
+      </div>
+
+      <h3 class="section-sub">Gejala Withdrawal</h3>
+      <p class="timeline-intro">Berbeza daripada pemulihan organ di atas — ini adalah apa yang anda mungkin RASA. Setiap orang berbeza.</p>
+      <div class="timeline-card">
+        <div class="timeline-list" id="withdrawalList"></div>
       </div>
     </section>
 
@@ -134,12 +182,16 @@
           <span class="stat-box-label">Jumlah rokok dilog</span>
         </div>
         <div class="stat-box">
-          <span class="stat-box-num" id="boxMinutesLost">0</span>
-          <span class="stat-box-label">Anggaran minit hayat hilang</span>
+          <span class="stat-box-num" id="boxBestStreak">—</span>
+          <span class="stat-box-label">Streak terbaik</span>
         </div>
         <div class="stat-box">
           <span class="stat-box-num" id="boxMoneySpent">RM0</span>
-          <span class="stat-box-label">Anggaran wang dibelanja</span>
+          <span class="stat-box-label">Wang dibelanja</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-box-num" id="boxMoneySaved">—</span>
+          <span class="stat-box-label">Anggaran dijimatkan</span>
         </div>
         <div class="stat-box">
           <span class="stat-box-num" id="boxAvgDay">0</span>
@@ -191,15 +243,55 @@
       <h2 class="view-title">Tetapan</h2>
 
       <div class="settings-card">
-        <label class="field-label" for="priceInput">Harga seunit rokok (RM)</label>
-        <input type="number" id="priceInput" min="0" step="0.05" inputmode="decimal" placeholder="cth: 0.60">
-        <p class="field-hint">Digunakan untuk anggarkan jumlah wang yang dijimatkan/dibelanja.</p>
+        <label class="field-label">Harga Rokok</label>
+        <div class="pack-price-row">
+          <div class="pack-price-field">
+            <span class="pack-price-mini-label">Harga sekotak (RM)</span>
+            <input type="number" id="packPriceInput" min="0" step="0.10" inputmode="decimal" placeholder="cth: 12.80">
+          </div>
+          <div class="pack-price-field">
+            <span class="pack-price-mini-label">Batang sekotak</span>
+            <input type="number" id="sticksPerPackInput" min="1" step="1" inputmode="numeric" placeholder="cth: 20">
+          </div>
+        </div>
+        <div class="cost-per-cig-display">
+          <span>Harga sebatang (auto)</span>
+          <strong id="costPerCigDisplay">RM0.60</strong>
+        </div>
+        <p class="field-hint">Wang dibelanja dikira daripada bilangan rokok yang anda log sebenar — bukan tempoh masa.</p>
+      </div>
+
+      <div class="settings-card">
+        <label class="field-label" for="cigsPerDayInput">Purata rokok sehari (dahulu)</label>
+        <input type="number" id="cigsPerDayInput" min="1" step="1" inputmode="numeric" placeholder="cth: 20">
+        <p class="field-hint">Pilihan — digunakan hanya untuk anggaran "wang dijimatkan". Tanpa ini, anggaran penjimatan tidak dipaparkan.</p>
       </div>
 
       <div class="settings-card">
         <label class="field-label" for="quitDateInput">Tarikh mula berhenti (pilihan)</label>
         <input type="date" id="quitDateInput">
-        <p class="field-hint">Jika ditetapkan, kiraan "tidak merokok" akan bermula dari tarikh ini selagi tiada log baru.</p>
+        <p class="field-hint">Menetapkan tarikh ini akan memulakan semula kiraan "tidak merokok" dari tarikh tersebut.</p>
+      </div>
+
+      <div class="settings-card">
+        <div class="app-lock-header">
+          <label class="field-label" style="margin-bottom:0">App Lock</label>
+          <label class="app-lock-switch">
+            <input type="checkbox" id="appLockToggle">
+            <span class="app-lock-switch-track"><span class="app-lock-switch-thumb"></span></span>
+          </label>
+        </div>
+        <p class="field-hint">Kunci LastCall dengan PIN supaya orang lain tidak boleh buka data anda.</p>
+        <div class="settings-subrow hidden" id="appLockTimeoutRow">
+          <label class="field-label" for="appLockTimeoutSelect">Kunci semula selepas</label>
+          <select id="appLockTimeoutSelect">
+            <option value="0">Serta-merta</option>
+            <option value="1">1 minit</option>
+            <option value="5" selected>5 minit</option>
+            <option value="15">15 minit</option>
+          </select>
+        </div>
+        <button type="button" class="secondary-btn hidden" id="appLockChangePinBtn" style="margin-top:10px">Tukar PIN</button>
       </div>
 
       <div class="settings-card">
@@ -227,6 +319,19 @@
         <svg class="btn-icon" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
         Reset Semua Data
       </button>
+
+      <div id="resetConfirmModal" class="modal-overlay hidden">
+        <div class="modal-card confirm-log-card">
+          <svg class="modal-icon modal-icon-warning" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          <h3>Padam semua data LastCall?</h3>
+          <p class="modal-sub">Tindakan ini tidak boleh diundur. Taip <strong>RESET</strong> di bawah untuk sahkan.</p>
+          <input type="text" id="resetConfirmInput" class="reset-confirm-input" autocomplete="off" autocapitalize="characters" placeholder="RESET" aria-label="Taip RESET untuk sahkan">
+          <div class="confirm-log-actions">
+            <button type="button" class="confirm-log-cancel" id="resetConfirmCancel">Batal</button>
+            <button type="button" class="confirm-log-yes" id="resetConfirmSubmit" disabled>Padam Semua</button>
+          </div>
+        </div>
+      </div>
 
       <p class="disclaimer">
         Nota: Anggaran kerosakan/kebaikan kesihatan dalam app ini berdasarkan data kesihatan umum (CDC, WHO) untuk tujuan motivasi sahaja, bukan nasihat perubatan. Sila rujuk doktor untuk khidmat nasihat kesihatan sebenar.
