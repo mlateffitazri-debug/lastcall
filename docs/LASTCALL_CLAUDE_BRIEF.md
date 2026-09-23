@@ -1812,3 +1812,643 @@ toward:
 ---
 
 # END OF BRIEF
+
+
+---
+
+# AMENDMENT — 23 SEPTEMBER 2026
+## Medical Timeline, Timer Synchronization & Money Calculation
+
+> This amendment supersedes conflicting earlier wording in this brief where necessary. Implement this amendment as the current product specification.
+
+## 1. TIMER + MEDICAL TIMELINE = ONE CLOCK
+
+The Current Streak Timer and Medical Timeline MUST use the same persisted timestamp.
+
+Architecture:
+
+```text
+lastCigaretteAt / currentAttemptStartedAt
+                    ↓
+             elapsedMs = now - start
+                    ↓
+        ┌───────────┴───────────┐
+        ↓                       ↓
+ Current Streak          Medical Timeline
+        ↓                       ↓
+ Best Streak             Milestone State
+```
+
+The Medical Timeline must never have an independent start time.
+
+The active timer and current medical milestone state reset only after a deliberate, confirmed cigarette log.
+
+They must NOT reset because of:
+
+- refresh
+- reopen
+- navigation
+- visibility/background/foreground change
+- PWA installation
+- service-worker update
+
+## 2. EXACT TIMESTAMP ARCHITECTURE
+
+Do not use a date-only `quitDate` as the sole source for the active timer.
+
+Preferred data:
+
+```js
+quit: {
+  plannedQuitAt: null,
+  currentAttemptStartedAt: "2026-09-23T08:15:30.000Z",
+  bestStreakMs: 0
+}
+
+cigaretteLogs: [
+  1758615330000
+]
+```
+
+When a cigarette is deliberately confirmed:
+
+```js
+logs.push(Date.now());
+```
+
+The current timer is derived from the latest cigarette timestamp, or from `currentAttemptStartedAt` if no cigarette has ever been logged.
+
+## 3. LIVE MEDICAL MILESTONE STATES
+
+Every medical milestone should have:
+
+```text
+LOCKED → NEXT → REACHED
+```
+
+Example:
+
+```text
+CURRENT STREAK
+47 minit
+
+✓ 20 minit — REACHED
+→ 8 jam — NEXT
+🔒 24 jam — LOCKED
+🔒 48 jam — LOCKED
+```
+
+The countdown to the next milestone MUST use the same elapsed timer.
+
+If a user confirms another cigarette:
+
+```text
+Current streak → 00:00:00
+Medical milestones → reset for current attempt
+Best streak → remains
+Historical logs → remain
+Previous achievements → remain
+```
+
+## 4. EVIDENCE-BASED MEDICAL TIMELINE
+
+Use conservative wording. Do not invent false precision or imply guaranteed individual outcomes.
+
+### 20 MINUTES
+
+**Timer threshold:** 20 minutes
+
+**Title:**
+> Denyutan jantung mula menurun.
+
+CDC states that heart rate drops after quitting. NHS gives 20 minutes as the point when pulse rate starts returning toward normal.
+
+**Source:** CDC / NHS
+
+### 8 HOURS
+
+**Timer threshold:** 8 hours
+
+**Title:**
+> Paras karbon monoksida mula berkurang.
+
+NHS states that oxygen levels recover and harmful carbon monoxide in the blood has reduced by about half after 8 hours.
+
+Do not present this as an exact individual laboratory measurement.
+
+**Source:** NHS
+
+### 12 HOURS
+
+**Timer threshold:** 12 hours
+
+**Title:**
+> Karbon monoksida terus menurun.
+
+CDC's established cessation timeline includes a 12-hour milestone for carbon monoxide dropping toward normal levels.
+
+Because official sources use slightly different milestone windows, use conservative wording.
+
+**Source:** CDC
+
+### 24 HOURS
+
+**Timer threshold:** 24 hours
+
+**Title:**
+> Paras nikotin dalam darah turun ke sifar.
+
+CDC states that nicotine in the blood drops to zero after 24 hours.
+
+Do NOT replace this with a blanket claim that every trace of nicotine has disappeared from the entire body or that withdrawal has ended.
+
+**Source:** CDC
+
+### 48 HOURS
+
+**Timer threshold:** 48 hours
+
+**Title:**
+> Deria rasa dan bau mula bertambah baik.
+
+NHS states that carbon monoxide levels have dropped to those of a non-smoker, the lungs are clearing mucus, and taste and smell are improving after 48 hours.
+
+**Source:** NHS
+
+### 72 HOURS
+
+**Timer threshold:** 72 hours
+
+**Title:**
+> Pernafasan mungkin terasa lebih mudah.
+
+NHS states that bronchial tubes begin to relax around 72 hours and some people may notice easier breathing and increased energy.
+
+Use "mungkin" because individual experience varies.
+
+**Source:** NHS
+
+### 2–12 WEEKS
+
+**Timer threshold:** 14 days for the first milestone state; the card represents the 2–12 week evidence range.
+
+**Title:**
+> Peredaran darah bertambah baik.
+
+NHS states that circulation improves over 2–12 weeks. CDC also reports ongoing health improvement after quitting.
+
+Do not claim that circulation has returned to a specific normal value.
+
+**Source:** NHS / CDC
+
+### 1–12 MONTHS
+
+**Title:**
+> Batuk dan sesak nafas boleh berkurang.
+
+CDC states that coughing and shortness of breath decrease over 1–12 months.
+
+**Source:** CDC
+
+### 3–9 MONTHS
+
+**Title:**
+> Masalah pernafasan boleh bertambah baik.
+
+NHS states that coughing, wheezing and breathing problems can improve over 3–9 months and describes improvement in lung function.
+
+Do NOT hard-code the old "30%" claim.
+
+**Source:** NHS
+
+### 1–2 YEARS
+
+**Title:**
+> Risiko serangan jantung turun dengan ketara.
+
+CDC states that heart-attack risk drops sharply 1–2 years after quitting.
+
+This is a population-level risk comparison, not an individualized prediction.
+
+**Source:** CDC
+
+### 3–6 YEARS
+
+**Title:**
+> Risiko tambahan penyakit jantung koronari berkurang.
+
+CDC states that the added risk of coronary heart disease drops by half over 3–6 years after quitting.
+
+**Source:** CDC
+
+### 5–10 YEARS
+
+**Title:**
+> Risiko strok dan beberapa kanser terus menurun.
+
+CDC states that stroke risk decreases and the added risk of cancers of the mouth, throat and voice box drops by half over 5–10 years.
+
+**Source:** CDC
+
+### 10 YEARS
+
+**Title:**
+> Risiko tambahan kanser paru-paru berkurang.
+
+CDC states that the added risk of lung cancer drops by half after 10–15 years, while risks of several other cancers decrease.
+
+Do not phrase this as an exact individual probability.
+
+**Source:** CDC
+
+### 15 YEARS
+
+**Title:**
+> Risiko penyakit jantung koronari menghampiri orang yang tidak merokok.
+
+CDC states that coronary heart disease risk drops close to that of someone who does not smoke after 15 years.
+
+Use "menghampiri", not "sama".
+
+**Source:** CDC
+
+### 20 YEARS
+
+**Title:**
+> Risiko beberapa kanser terus berkurang.
+
+CDC states that risks for several smoking-related cancers continue to fall toward levels seen in people who do not smoke.
+
+This remains a population-level statement.
+
+**Source:** CDC
+
+## 5. MEDICAL MILESTONE DATA STRUCTURE
+
+Do not mix medical content directly into timer arithmetic.
+
+Preferred structure:
+
+```js
+const MEDICAL_MILESTONES = [
+  {
+    id: "20m",
+    thresholdMs: 20 * 60 * 1000,
+    label: "20 minit",
+    title: "Denyutan jantung mula menurun",
+    source: "CDC/NHS"
+  },
+  {
+    id: "8h",
+    thresholdMs: 8 * 60 * 60 * 1000,
+    label: "8 jam",
+    title: "Paras karbon monoksida mula berkurang",
+    source: "NHS"
+  },
+  {
+    id: "12h",
+    thresholdMs: 12 * 60 * 60 * 1000,
+    label: "12 jam",
+    title: "Karbon monoksida terus menurun",
+    source: "CDC"
+  },
+  {
+    id: "24h",
+    thresholdMs: 24 * 60 * 60 * 1000,
+    label: "24 jam",
+    title: "Paras nikotin dalam darah turun ke sifar",
+    source: "CDC"
+  },
+  {
+    id: "48h",
+    thresholdMs: 48 * 60 * 60 * 1000,
+    label: "48 jam",
+    title: "Deria rasa dan bau mula bertambah baik",
+    source: "NHS"
+  },
+  {
+    id: "72h",
+    thresholdMs: 72 * 60 * 60 * 1000,
+    label: "72 jam",
+    title: "Pernafasan mungkin terasa lebih mudah",
+    source: "NHS"
+  },
+  {
+    id: "2w",
+    thresholdMs: 14 * 24 * 60 * 60 * 1000,
+    label: "2–12 minggu",
+    title: "Peredaran darah bertambah baik",
+    source: "NHS/CDC"
+  },
+  {
+    id: "1m",
+    thresholdMs: 30 * 24 * 60 * 60 * 1000,
+    label: "1–12 bulan",
+    title: "Batuk dan sesak nafas boleh berkurang",
+    source: "CDC"
+  },
+  {
+    id: "1y",
+    thresholdMs: 365 * 24 * 60 * 60 * 1000,
+    label: "1–2 tahun",
+    title: "Risiko serangan jantung turun dengan ketara",
+    source: "CDC"
+  }
+];
+```
+
+Long-range ranges such as 1–2 years, 3–6 years and 5–10 years should be displayed as ranges, not as exact biological switches.
+
+## 6. MEDICAL SOURCE POLICY
+
+Primary sources:
+
+- CDC
+- NHS
+- KKM / Ministry of Health Malaysia where directly relevant
+- peer-reviewed evidence where necessary
+
+Current references:
+
+- CDC: https://www.cdc.gov/tobacco/about/benefits-of-quitting.html
+- NHS: https://www.nhs.uk/better-health/quit-smoking/
+- NHS nicotine withdrawal: https://www.nhs.uk/better-health/quit-smoking/staying-smoke-free/managing-nicotine-withdrawal-symptoms/
+
+Every medical card should expose its source.
+
+Do not copy unsupported claims from social-media health infographics.
+
+## 7. REMOVE / REWORK OLD MEDICAL CLAIMS
+
+Do not use these as individualized facts:
+
+- "11 minutes of life lost per cigarette"
+- "93% nicotine reduction"
+- "100% nicotine gone from the body after 3 days"
+- "lung function increases 30%"
+- "cilia recover completely"
+- blanket claims that mortality becomes equal to a non-smoker at a specific date
+
+If statistical claims are used later, clearly label them as population-level estimates and provide a source.
+
+## 8. WITHDRAWAL TIMELINE — SEPARATE FROM HEALTH TIMELINE
+
+Withdrawal should be a separate section because it describes what the user may feel, rather than an organ-recovery milestone.
+
+Suggested timeline:
+
+```text
+Beberapa jam
+↓
+Withdrawal boleh bermula
+
+Hari 1–3
+↓
+Gejala biasanya paling kuat
+
+Minggu pertama
+↓
+Craving, irritability, restlessness and concentration problems boleh berlaku
+
+3–4 minggu
+↓
+Bagi ramai orang, gejala withdrawal semakin berkurang
+```
+
+NHS states withdrawal can start within a few hours, is usually strongest during the first week, especially the first 3 days, and averages around 3–4 weeks. Some people experience symptoms longer.
+
+Do not tell the user that withdrawal must end on a specific day.
+
+## 9. MONEY MODEL — PACK PRICE
+
+The money model is amended to use pack price and pack size.
+
+Settings UI:
+
+```text
+Harga sekotak: RM12.80
+Batang sekotak: 20
+Harga sebatang: RM0.64 (auto)
+```
+
+Formula:
+
+```js
+costPerCig = packPrice / sticksPerPack;
+```
+
+### Money spent
+
+Money spent is based ONLY on cigarettes actually logged:
+
+```js
+moneySpent = totalLoggedCigarettes * costPerCig;
+```
+
+Example:
+
+```text
+RM12.80 / 20 = RM0.64
+
+1  cigarette = RM0.64
+5  cigarettes = RM3.20
+10 cigarettes = RM6.40
+20 cigarettes = RM12.80
+25 cigarettes = RM16.00
+```
+
+### Money saved
+
+Money saved is separate from money spent:
+
+```js
+expectedCigarettes = cigarettesPerDay * smokeFreeDays;
+
+cigarettesAvoided = Math.max(
+  0,
+  expectedCigarettes - actualCigarettesLogged
+);
+
+moneySaved = cigarettesAvoided * costPerCig;
+```
+
+Clearly label this as an estimate.
+
+Do not assume 20 sticks per pack if the user enters a different pack size.
+
+## 10. DATA MIGRATION FOR PRICE MODEL
+
+Existing users may have:
+
+```js
+pricePerCig
+```
+
+Do not silently overwrite this value with a guessed pack price.
+
+Migration should preserve the existing effective cost.
+
+Preferred new settings:
+
+```js
+{
+  packPrice: 12.80,
+  sticksPerPack: 20,
+  costPerCig: 0.64
+}
+```
+
+`costPerCig` can be derived rather than persisted.
+
+If legacy `pricePerCig` exists, preserve it as a fallback until the user enters pack price and pack size.
+
+## 11. TIMER + TIMELINE ACCEPTANCE TESTS
+
+### Test A — 20 minutes
+
+Given:
+
+```text
+lastCigaretteAt = now - 20 minutes
+```
+
+Expected:
+
+```text
+Timer >= 20:00
+20-minute milestone = REACHED
+8-hour milestone = NEXT
+```
+
+### Test B — 48 hours
+
+Given:
+
+```text
+lastCigaretteAt = now - 48 hours
+```
+
+Expected:
+
+```text
+48-hour milestone = REACHED
+72-hour milestone = NEXT
+```
+
+### Test C — refresh
+
+At 48 hours:
+
+```text
+reload app
+```
+
+Expected:
+
+```text
+timer remains approximately 48 hours
+medical milestone remains reached
+```
+
+### Test D — accidental cigarette button tap
+
+Expected:
+
+```text
+confirmation modal appears
+no log is created
+timer unchanged
+medical timeline unchanged
+```
+
+### Test E — cancel
+
+Expected:
+
+```text
+no log
+timer unchanged
+timeline unchanged
+```
+
+### Test F — confirmed cigarette
+
+Expected:
+
+```text
+new timestamp created
+current timer resets
+current medical timeline resets
+best streak remains
+historical logs remain
+```
+
+### Test G — money
+
+Given:
+
+```text
+packPrice = 12.80
+sticksPerPack = 20
+logged cigarettes = 5
+```
+
+Expected:
+
+```text
+costPerCig = 0.64
+moneySpent = RM3.20
+```
+
+### Test H — export/import
+
+Expected:
+
+```text
+packPrice preserved
+sticksPerPack preserved
+costPerCig calculated correctly
+cigarette logs preserved
+timer remains consistent
+```
+
+## 12. RELEASE CHECKLIST AMENDMENT
+
+Before release:
+
+- [ ] Medical timeline uses the same persisted timestamp as the timer.
+- [ ] Medical timeline survives refresh/reopen/background/foreground.
+- [ ] Confirmed cigarette log resets current timeline and timer.
+- [ ] Best streak is not erased after relapse.
+- [ ] Medical cards show source attribution.
+- [ ] Old unsupported medical claims are removed.
+- [ ] No 11-minutes-per-cigarette individualized claim.
+- [ ] No 30% lung-function claim unless specifically sourced and correctly contextualized.
+- [ ] Pack price + sticks per pack are used for cigarette cost.
+- [ ] Money spent counts actual logged cigarettes.
+- [ ] Money saved is clearly an estimate.
+- [ ] Legacy `pricePerCig` data is preserved during migration.
+- [ ] Export/import preserves the new price model.
+- [ ] Service-worker cache is bumped after implementation.
+
+## 13. CURRENT PRODUCT PRINCIPLE
+
+The user should be able to look at LastCall and understand:
+
+```text
+MY TIMER
+     ↓
+HOW LONG SINCE MY LAST CIGARETTE?
+     ↓
+WHAT MAY BE HAPPENING IN MY BODY?
+     ↓
+WHAT MILESTONE IS NEXT?
+     ↓
+WHAT CAN I DO IF I CRAVE?
+```
+
+The Medical Timeline is therefore a live companion to the timer, not a separate static article.
+
+---
+
+# END OF AMENDMENT
